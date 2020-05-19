@@ -1,0 +1,1 @@
+conda acivate zipline-env

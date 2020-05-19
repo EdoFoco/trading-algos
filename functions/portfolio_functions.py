@@ -27,6 +27,34 @@ def plot_normal_zscore(zscore):
     fig.show()
 
 
+
+def plot_objects(objs):
+    fig = go.Figure()
+
+    for o in objs:
+        # print(macd_low)
+        fig.add_trace(go.Scatter(x=o['value'].index, y=o['value'],
+                                 mode='lines',
+                                 name=o['label']))
+
+    fig.show()
+
+
+
+def plot_correlations(correlations, mavg):
+    fig = go.Figure()
+
+    # print(macd_low)
+    fig.add_trace(go.Scatter(x=correlations.index, y=correlations,
+                             mode='lines',
+                             name='corr'))
+
+    fig.add_trace(go.Scatter(x=mavg.index, y=mavg,
+                             mode='lines',
+                             name='mavg'))
+    fig.show()
+
+
 def plot_ratios(ratios):
     fig = go.Figure()
 
@@ -107,42 +135,116 @@ def buy(date, symbol1, s1_price, symbol2, s2_price, indicator_val, leverage_limi
     portfolio['holdings']['s1'] = {'amount': amount, 'bought_at': s1_price, 'type': 'BUY', 'bought_on': date, 'symbol': symbol1, 'status': 'OPEN', 'leverage': leverage}
     portfolio['holdings']['s2'] = {'amount': amount, 'bought_at': s2_price, 'type': 'SELL', 'bought_on': date, 'symbol': symbol2, 'status': 'OPEN', 'leverage': leverage}
     portfolio['cash'] = portfolio['cash'] - amount*2
+    #print(portfolio['cash'])
+
+    return portfolio
+
+
+def sell_with_hedge(date, symbol1, s1_price, symbol2, s2_price, indicator_val, leverage_limit, max_leverage, portfolio, hr):
+    #hedge_amount = abs(spread) / 100
+    #print(hedge_amount)
+    hedge_amount = portfolio['cash'] * hr
+    print(hedge_amount)
+    equal_parts = portfolio['cash'] / 2
+    s2_amount = equal_parts - hedge_amount
+    s1_amount = portfolio['cash'] - s2_amount
+
+    leverage = 1
+    if indicator_val > leverage_limit:
+        leverage = max_leverage
+
+    portfolio['holdings']['s1'] = {'amount': s1_amount, 'bought_at': s1_price, 'type': 'SELL', 'bought_on': date, 'symbol': symbol1, 'status': 'OPEN', 'leverage': leverage}
+    portfolio['holdings']['s2'] = {'amount': s2_amount, 'bought_at': s2_price, 'type': 'BUY', 'bought_on': date, 'symbol': symbol2, 'status': 'OPEN', 'leverage': leverage}
+    portfolio['cash'] = portfolio['cash'] - s1_amount - s2_amount
+
+    return portfolio
+
+
+def buy_with_hedge(date, symbol1, s1_price, symbol2, s2_price, indicator_val, leverage_limit, max_leverage, portfolio, hr):
+    #hedge_amount = abs(spread) / 100
+    hedge_amount = portfolio['cash'] * hr
+    print(hedge_amount)
+    equal_parts = portfolio['cash'] / 2
+    s1_amount = equal_parts - hedge_amount
+    s2_amount = portfolio['cash'] - s1_amount
+
+    leverage = 1
+    if indicator_val < -leverage_limit:
+        leverage = max_leverage
+
+    portfolio['holdings']['s1'] = {'amount': s1_amount, 'bought_at': s1_price, 'type': 'BUY', 'bought_on': date, 'symbol': symbol1, 'status': 'OPEN', 'leverage': leverage}
+    portfolio['holdings']['s2'] = {'amount': s2_amount, 'bought_at': s2_price, 'type': 'SELL', 'bought_on': date, 'symbol': symbol2, 'status': 'OPEN', 'leverage': leverage}
+    portfolio['cash'] = portfolio['cash'] - s1_amount - s2_amount
+
     return portfolio
 
 
 def exit(date, symbol1, s1_price, symbol2, s2_price, indicator_val, leverage_limit, max_leverage, portfolio):
-    s1_res = portfolio['holdings']['s1']
-    s1_res['sold_on'] = date
-    s1_res['sold_at'] = s1_price
-    s1_res['status'] = 'CLOSE'
-    s1_res = get_holding_return_on_close(s1_res)
 
-    s2_res = portfolio['holdings']['s2']
-    s2_res['sold_on'] = date
-    s2_res['sold_at'] = s2_price
-    s2_res['status'] = 'CLOSE'
-    s2_res = get_holding_return_on_close(s2_res)
 
-    portfolio['cash'] = s1_res['nav'] + s2_res['nav']
+    if portfolio['holdings']['s1'] is not None:
+        s1_res = portfolio['holdings']['s1']
+        s1_res['sold_on'] = date
+        s1_res['sold_at'] = s1_price
+        s1_res['status'] = 'CLOSE'
+        s1_res = get_holding_return_on_close(s1_res)
+        #print(s1_res)
+        portfolio['cash'] += s1_res['nav']
+        portfolio['history'] = portfolio['history'].append(s1_res, ignore_index=True)
+        portfolio['holdings']['s1'] = None
 
-    portfolio['nav'] = portfolio['nav'].append({'date': date, 'nav': portfolio['cash']}, ignore_index=True)
+    if portfolio['holdings']['s2'] is not None:
+        s2_res = portfolio['holdings']['s2']
+        s2_res['sold_on'] = date
+        s2_res['sold_at'] = s2_price
+        s2_res['status'] = 'CLOSE'
+        s2_res = get_holding_return_on_close(s2_res)
+        portfolio['cash'] += s2_res['nav']
+        portfolio['history'] = portfolio['history'].append(s2_res, ignore_index=True)
+        portfolio['holdings']['s2'] = None
 
-    portfolio['history'] = portfolio['history'].append(s1_res, ignore_index=True)
-    portfolio['history'] = portfolio['history'].append(s2_res, ignore_index=True)
+    return portfolio
 
-    portfolio['holdings']['s1'] = None
-    portfolio['holdings']['s2'] = None
+
+def stop_loss(date, s1_price, s2_price, portfolio, sl_value):
+    if portfolio['holdings']['s1'] is not None:
+        s1_res = portfolio['holdings']['s1']
+        s1_res['sold_on'] = date
+        s1_res['sold_at'] = s1_price
+        s1_res['status'] = 'CLOSE'
+        s1_res = get_holding_return_on_close(s1_res)
+        if s1_res['return'] < sl_value:
+            print(f"Trigger SL on s1: {date} {s1_res['return']}")
+            portfolio['cash'] += s1_res['nav']
+            portfolio['history'] = portfolio['history'].append(s1_res, ignore_index=True)
+            portfolio['holdings']['s1'] = None
+
+    if portfolio['holdings']['s2'] is not None:
+        s2_res = portfolio['holdings']['s2']
+        s2_res['sold_on'] = date
+        s2_res['sold_at'] = s2_price
+        s2_res['status'] = 'CLOSE'
+        s2_res = get_holding_return_on_close(s2_res)
+
+        if s2_res['return'] < sl_value:
+            print(f"Trigger SL on  s2: {date} {s2_res['return']}")
+            portfolio['cash'] += s2_res['nav']
+            portfolio['history'] = portfolio['history'].append(s2_res, ignore_index=True)
+            portfolio['holdings']['s2'] = None
 
     return portfolio
 
 
 def calculate_nav(date, portfolio, s1_price, s2_price):
-    holdings_nav = 0
-    if portfolio['holdings']['s1'] != None and portfolio['holdings']['s2'] != None:
+    s1_nav = 0
+    s2_nav = 0
+    if portfolio['holdings']['s1'] is not None:
         s1_nav = get_open_holding_nav(portfolio['holdings']['s1'], s1_price)
-        s2_nav = get_open_holding_nav(portfolio['holdings']['s2'], s2_price)
-        holdings_nav = s1_nav + s2_nav
 
+    if portfolio['holdings']['s2'] is not None:
+        s2_nav = get_open_holding_nav(portfolio['holdings']['s2'], s2_price)
+
+    holdings_nav = s1_nav + s2_nav
     portfolio['nav'] = portfolio['nav'].append({'date': date, 'nav': portfolio['cash'] + holdings_nav}, ignore_index=True)
     return portfolio
 
@@ -174,7 +276,9 @@ def plot_normalized_returns(s1_symbol, s1, s2_symbol, s2, portfolio):
 
 
 def print_kpis(data):
+    #data = data.astype({'nav': 'float'})
     normalized = base_fx.normalize(data)
+
     returns = np.log(normalized / normalized.shift(1))
     vol = returns.std() * 250 ** 0.5
     vol.columns = ['Vol']
@@ -183,6 +287,21 @@ def print_kpis(data):
 
     print('Vol:')
     print(vol.iloc[-1])
+
+
+def get_monthly_kpis(data):
+    if len(data) == 0:
+        return None, None, None
+
+    normalized = base_fx.normalize(data)
+    returns = np.log(normalized / normalized.shift(1))
+    vol = returns.std()
+    vol.columns = ['Vol']
+    ret = normalized.iloc[-1]['nav'] - 1
+    sharpe = ret / vol.iloc[-1]
+    #print(f'Return: {str(ret)}, Vol: {str(vol)}, Sharpe: {str(sharpe)}')
+
+    return ret, vol.iloc[-1], sharpe
 
 
 def plot_trades_on_zscore_for_symbol(mavg_zscore, portfolio, symbol):
@@ -230,4 +349,58 @@ def plot_trades_on_zscore_for_symbol(mavg_zscore, portfolio, symbol):
     fig.add_trace(go.Scatter(x=exit_zscore.index, y=exit_zscore[0],
                              mode='markers',
                              name='exit'))
+    fig.show()
+
+
+def plot_trades_on_series(symbol1, symbol2, s1, s2, portfolio):
+    #print(s1)
+    s1 = s1.to_frame()
+    history = portfolio['history']
+    print(portfolio['history'])
+
+    s1_history = portfolio['history'][portfolio['history']['symbol'] == symbol1]
+    s1_sell = s1_history[s1_history['type'] == "SELL"]
+    s1_buy = s1_history[s1_history['type'] == "BUY"]
+
+    s2_history = portfolio['history'][portfolio['history']['symbol'] == symbol2]
+    s2_sell = s2_history[s2_history['type'] == "SELL"]
+    s2_buy = s2_history[s2_history['type'] == "BUY"]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=s1.index, y=s1[symbol1],
+                             mode='lines',
+                             name='s1'))
+
+    fig.add_trace(go.Scatter(x=s1_sell['bought_on'], y=s1_sell['bought_at'],
+                             mode='markers',
+                             name='sell_in'))
+
+    fig.add_trace(go.Scatter(x=s1_sell['sold_on'], y=s1_sell['sold_at'],
+                             mode='markers',
+                             #color='orange',
+                             name='sell_out'))
+
+    fig.add_trace(go.Scatter(x=s1_buy['bought_on'], y=s1_buy['bought_at'],
+                             mode='markers',
+                             name='buy_in'))
+
+    fig.add_trace(go.Scatter(x=s1_buy['sold_on'], y=s1_buy['sold_at'],
+                             mode='markers',
+                             # color='orange',
+                             name='buy_out'))
+
+    fig.show()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(x=s1_history['sold_on'], y=s1_history['nav'],
+                             mode='lines',
+                             # color='orange',
+                             name='s1_nav'))
+
+    fig.add_trace(go.Scatter(x=s2_history['sold_on'], y=s2_history['nav'],
+                             mode='lines',
+                             # color='orange',
+                             name='s2_nav'))
+
     fig.show()
