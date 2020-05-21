@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import functions.functions as base_fx
 import numpy as np
-
+from math import sqrt
 
 def init_portfolio():
     return {
@@ -289,6 +289,13 @@ def print_kpis(data):
     print('Vol:')
     print(vol.iloc[-1])
 
+    cum_ret = returns.cumsum() + 1
+    print('Cum Sum:')
+    print(cum_ret)
+
+    sharpe = ((returns.mean() / returns.std()) * sqrt(252))
+    print('Sharpe:')
+    print(sharpe)
 
 def get_monthly_kpis(data):
     if len(data) == 0:

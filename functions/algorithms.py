@@ -185,7 +185,7 @@ def pair_trade_with_zscore_limit_and_corr(settings, quotes):
     correlations = pd.Series()
     zscore_correlations = pd.Series()
     zscore_vol = pd.Series()
-
+    mavg_zscore = None
 
     for day, row in quotes.iterrows():
         ## Calculate indicators
@@ -203,7 +203,10 @@ def pair_trade_with_zscore_limit_and_corr(settings, quotes):
         if mavg_fast_r is None or mavg_slow_r is None or std_r is None:
             continue
 
-        mavg_zscore = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)
+        if mavg_zscore is None:
+            mavg_zscore = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)
+
+        mavg_zscore.loc[day] = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)[-1]
 
         macd_fast = base_fx.get_macd(mavg_zscore, settings['macd_fast_points'])
         macd_slow = base_fx.get_macd(mavg_zscore, settings['macd_slow_points'])
@@ -231,7 +234,7 @@ def pair_trade_with_zscore_limit_and_corr(settings, quotes):
         zscore_vol.loc[day] = zscore_correlations.std()
 
         # print(c[1])
-        correlation_exists = c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
+        correlation_exists = abs(zscore_correlations.loc[day]) < settings['coint_limit']#c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
         # if not correlation_exists:
         #     print('correlation fails ' + str(c[1]))
 
