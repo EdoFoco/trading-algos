@@ -232,8 +232,8 @@ def pair_trade_with_zscore_limit_and_corr(settings, quotes):
 
         # print(c[1])
         correlation_exists = c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
-        if not correlation_exists:
-            print('correlation fails ' + str(c[1]))
+        # if not correlation_exists:
+        #     print('correlation fails ' + str(c[1]))
 
         ## Trade
 
@@ -296,6 +296,15 @@ def get_hedge_ratio(symbol1, symbol2, quotes):
 
     return df
 
+
+def get_hedge_ratio_with_kalman(symbol1, symbol2, quotes):
+    state_means = KalmanFilterRegression(KalmanFilterAverage(quotes[symbol1]), KalmanFilterAverage(quotes[symbol2]))
+    df = pd.DataFrame(index=quotes.index)
+    df['hr'] = - state_means[:, 0]
+    df['spread'] = quotes[symbol1] + (quotes[symbol2] * df.hr)
+    return df
+
+
 def get_half_life(spread):
     #print(spread)
     spread_lag = spread.shift(1)
@@ -309,6 +318,7 @@ def get_half_life(spread):
     if halflife <= 0:
         halflife = 1
     return halflife
+
 
 def KalmanFilterAverage(x):
   # Construct a Kalman filter
@@ -338,6 +348,7 @@ def KalmanFilterRegression(x,y):
     # Use the observations y to get running estimates and errors for the state parameters
     state_means, state_covs = kf.filter(y.values)
     return state_means
+
 
 def pair_trade_with_zscore_limit_and_corr_and_hr_and_half_life(settings, quotes):
     portfolio = portfolio_fx.init_portfolio()
@@ -374,10 +385,9 @@ def pair_trade_with_zscore_limit_and_corr_and_hr_and_half_life(settings, quotes)
 ## End old part
 ## Start New
 
-        #state_means = KalmanFilterRegression(KalmanFilterAverage(s1), KalmanFilterAverage(s2))
         #print(state_means)
 
-        hr = get_hedge_ratio(settings['symbol1'], settings['symbol2'], filtered_quotes)
+        hr = get_hedge_ratio_with_kalman(settings['symbol1'], settings['symbol2'], filtered_quotes)
         #print(hr)
         half_life = get_half_life(hr['spread'])
         if len(filtered_quotes) < half_life:
@@ -387,18 +397,21 @@ def pair_trade_with_zscore_limit_and_corr_and_hr_and_half_life(settings, quotes)
         daily_hr.loc[day]['hr'] = hr.iloc[-1]['hr']
         daily_hr.loc[day]['spread'] = hr.iloc[-1]['spread']
         daily_hr.loc[day]['half_life'] = half_life
-
-        meanSpread = daily_hr['spread'].rolling(window=half_life).mean()
-        stdSpread = daily_hr['spread'].rolling(window=half_life).std()
-        mavg_zscore = (daily_hr['spread'] - meanSpread) / stdSpread
+        #
+        # meanSpread = daily_hr['spread'].rolling(window=half_life).mean()
+        # stdSpread = daily_hr['spread'].rolling(window=half_life).std()
+        # mavg_zscore = (daily_hr['spread'] - meanSpread) / stdSpread
        # print(half_life)
         #print(half_life)
         mavg_fast_r = base_fx.get_mavg(ratios, settings['mavg_1'])
         mavg_slow_r = base_fx.get_mavg(ratios, settings['mavg_2'])
-        #print(mavg_fast_r)
+
         std_r = base_fx.get_std(ratios, settings['mavg_2'])
 
-        #mavg_zscore = base_fx.get_zscore(ratios, ratios.mean(), ratios.std())
+        if mavg_fast_r is None or mavg_slow_r is None or std_r is None:
+            continue
+
+        mavg_zscore = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)
 ## End New
 
         macd_fast = base_fx.get_macd(mavg_zscore, settings['macd_fast_points'])
@@ -511,9 +524,9 @@ def pair_trade_with_zscore_limit_and_corr_and_hr(settings, quotes):
 
         hr = get_hedge_ratio(settings['symbol1'], settings['symbol2'], filtered_quotes)
         #print(hr)
-        half_life = get_half_life(hr['spread'])
-        if len(filtered_quotes) < half_life:
-            continue
+        #half_life = get_half_life(hr['spread'])
+        #if len(filtered_quotes) < half_life:
+        #    continue
 
         mavg_fast_r = base_fx.get_mavg(ratios, settings['mavg_1'])
         mavg_slow_r = base_fx.get_mavg(ratios, settings['mavg_2'])
@@ -527,7 +540,7 @@ def pair_trade_with_zscore_limit_and_corr_and_hr(settings, quotes):
         daily_hr.loc[day] = None
         daily_hr.loc[day]['hr'] = hr.iloc[-1]['hr']
         daily_hr.loc[day]['spread'] = hr.iloc[-1]['spread']
-        daily_hr.loc[day]['half_life'] = half_life
+        #daily_hr.loc[day]['half_life'] = half_life
 
 ## End New
 

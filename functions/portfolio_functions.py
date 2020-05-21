@@ -142,12 +142,13 @@ def buy(date, symbol1, s1_price, symbol2, s2_price, indicator_val, leverage_limi
 
 def sell_with_hedge(date, symbol1, s1_price, symbol2, s2_price, indicator_val, leverage_limit, max_leverage, portfolio, hr):
     #hedge_amount = abs(spread) / 100
-    #print(hedge_amount)
-    hedge_amount = portfolio['cash'] * hr
-    print(hedge_amount)
+    hedge_amount = portfolio['cash'] * -hr
+    print(f'HedgeRatio: {str(hr)}, HedgeAmount:{str(hedge_amount)}')
     equal_parts = portfolio['cash'] / 2
-    s2_amount = equal_parts - hedge_amount
-    s1_amount = portfolio['cash'] - s2_amount
+    s1_amount = equal_parts + hedge_amount
+    s2_amount = portfolio['cash'] - s1_amount
+
+
 
     leverage = 1
     if indicator_val > leverage_limit:
@@ -162,11 +163,11 @@ def sell_with_hedge(date, symbol1, s1_price, symbol2, s2_price, indicator_val, l
 
 def buy_with_hedge(date, symbol1, s1_price, symbol2, s2_price, indicator_val, leverage_limit, max_leverage, portfolio, hr):
     #hedge_amount = abs(spread) / 100
-    hedge_amount = portfolio['cash'] * hr
-    print(hedge_amount)
+    hedge_amount = portfolio['cash'] * -hr
+    print(f'HedgeRatio: {str(hr)}, HedgeAmount:{str(hedge_amount)}')
     equal_parts = portfolio['cash'] / 2
-    s1_amount = equal_parts - hedge_amount
-    s2_amount = portfolio['cash'] - s1_amount
+    s2_amount = equal_parts + hedge_amount
+    s1_amount = portfolio['cash'] - s2_amount
 
     leverage = 1
     if indicator_val < -leverage_limit:
