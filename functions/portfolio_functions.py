@@ -209,19 +209,21 @@ def exit(date, symbol1, s1_price, symbol2, s2_price, indicator_val, leverage_lim
 
 def stop_loss(date, s1_price, s2_price, portfolio, sl_value):
     if portfolio['holdings']['s1'] is not None:
-        s1_res = portfolio['holdings']['s1']
+        s1_res = portfolio['holdings']['s1'].copy()
         s1_res['sold_on'] = date
         s1_res['sold_at'] = s1_price
         s1_res['status'] = 'CLOSE'
         s1_res = get_holding_return_on_close(s1_res)
+        print(s1_res['return'])
         if s1_res['return'] < sl_value:
+            s1_res['return']
             print(f"Trigger SL on s1: {date} {s1_res['return']}")
             portfolio['cash'] += s1_res['nav']
             portfolio['history'] = portfolio['history'].append(s1_res, ignore_index=True)
             portfolio['holdings']['s1'] = None
 
     if portfolio['holdings']['s2'] is not None:
-        s2_res = portfolio['holdings']['s2']
+        s2_res = portfolio['holdings']['s2'].copy()
         s2_res['sold_on'] = date
         s2_res['sold_at'] = s2_price
         s2_res['status'] = 'CLOSE'

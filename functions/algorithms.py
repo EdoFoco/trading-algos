@@ -186,14 +186,16 @@ def pair_trade_with_zscore_limit_and_corr(settings, quotes):
     zscore_correlations = pd.Series()
     zscore_vol = pd.Series()
     mavg_zscore = None
+    ratios = pd.Series()
+    vol = pd.Series()
 
     for day, row in quotes.iterrows():
         ## Calculate indicators
         filtered_quotes = quotes.loc[:day]
-        s1 = filtered_quotes[settings['symbol1']]
-        s2 = filtered_quotes[settings['symbol2']]
+        s1 = filtered_quotes[settings['symbol1']].tail(settings['analysis_period'])
+        s2 = filtered_quotes[settings['symbol2']].tail(settings['analysis_period'])
 
-        ratios = base_fx.get_ratios(s1, s2)
+        ratios.loc[day] = base_fx.get_ratios(s1, s2)[-1]
 
         mavg_fast_r = base_fx.get_mavg(ratios, settings['mavg_1'])
         mavg_slow_r = base_fx.get_mavg(ratios, settings['mavg_2'])
@@ -211,30 +213,147 @@ def pair_trade_with_zscore_limit_and_corr(settings, quotes):
         macd_fast = base_fx.get_macd(mavg_zscore, settings['macd_fast_points'])
         macd_slow = base_fx.get_macd(mavg_zscore, settings['macd_slow_points'])
 
-        vol = ratios.rolling(settings['vol_interval']).std(ddof=0)
+        vol.loc[day] = ratios.tail(settings['analysis_period']).rolling(settings['mavg_2']).std(ddof=0)[-1]  # ratios.rolling(settings['vol_interval']).std(ddof=0)[-1]
 
-        ## Understand is volaltility is within limits for the period
-        ## Get the the last 30 peaks, then find the mean of those peaks. That's the limit
-        sorted_vol = vol.tail(settings['vol_peak_period']).sort_values(ascending=False).head(
-            settings['vol_mean_peak_period'])
-
-        vol_mean = sorted_vol.mean()
+        vol_mean = (vol.mean() * settings['vol_tolerance']) + vol.mean()  # sorted_vol.mean()
         if len(vol_limit) == 0:
             vol_limit = pd.Series(index=vol.index)
 
         vol_limit.loc[day] = vol_mean
-        within_vol = not math.isnan(vol.loc[day]) and vol.loc[day] < vol_limit[day]
 
-        c = coint(s1, s2)
+        vol_mavg_slow_r = base_fx.get_mavg(vol, settings['mavg_2'])
+        if vol_mavg_slow_r is None:
+            continue
+
+        zscore_vol.loc[day] = base_fx.get_zscore(vol_mavg_slow_r, vol_mavg_slow_r.mean(), vol_mavg_slow_r.std())[-1]
+
+        within_vol = abs(zscore_vol.loc[day]) <= 2 and vol.loc[day] < vol_limit[day]
+
+        c = coint(s1.tail(settings['analysis_period']), s2.tail(settings['analysis_period']))
         correlations.loc[day] = c[1]
         zscore_correlations.loc[day] = base_fx.get_zscore(correlations,
                                                           correlations.mean(),
                                                           correlations.std())[-1]  # base_fx.get_mavg(correlations, 450)
 
-        zscore_vol.loc[day] = zscore_correlations.std()
+        correlation_exists = abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
+
+        ## Trade
+
+        if macd_slow[day] <= macd_fast[day]:
+            new_trend = "UP"
+        else:
+            new_trend = "DOWN"
+
+        if mavg_zscore[day] > settings['limit'] and new_trend == "DOWN" and within_vol and correlation_exists:
+            if portfolio['holdings']['s1'] == None and portfolio['holdings']['s2'] == None:
+                ## sell
+                portfolio = portfolio_fx.sell(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                              mavg_zscore[day],
+                                              settings['leverage_limit'], settings['max_leverage'], portfolio)
+
+        elif mavg_zscore[day] < -settings['limit'] and new_trend == "UP" and within_vol and correlation_exists:
+            if portfolio['holdings']['s1'] == None and portfolio['holdings']['s2'] == None:
+                ## buy
+                portfolio = portfolio_fx.buy(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                             mavg_zscore[day],
+                                             settings['leverage_limit'], settings['max_leverage'], portfolio)
+
+        elif abs(mavg_zscore[day]) < settings['exit_limit'] or not within_vol or not correlation_exists:
+            if portfolio['holdings']['s1'] != None and portfolio['holdings']['s2'] != None:
+                ## exit
+                portfolio = portfolio_fx.exit(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                              mavg_zscore[day],
+                                              settings['leverage_limit'], settings['max_leverage'], portfolio)
+
+        portfolio = portfolio_fx.calculate_nav(day, portfolio, s1.loc[day], s2.loc[day])
+        # portfolio = portfolio_fx.stop_loss(day, s1.loc[day], s2.loc[day], portfolio, settings['sl_limit'])
+
+    portfolio['nav'] = portfolio['nav'].set_index('date')
+
+    print('zscore correlation')
+    portfolio_fx.plot_objects(
+        [{'label': 'zscore_corr', 'value': zscore_correlations}, {'label': 'corr', 'value': correlations}])
+
+    print('corr volatility ')
+    # portfolio_fx.plot_objects([{'label': 'zscore_vol', 'value': zscore_vol}])
+    portfolio_fx.plot_indicators(mavg_zscore, macd_fast, macd_slow, vol, vol_mean, vol_limit)
+
+    print('corr vol zscore')
+    portfolio_fx.plot_objects(
+        [{'label': 'vol', 'value': vol}, {'label': 'zscore', 'value': zscore_vol},
+         {'label': 'vol limit', 'value': vol_limit}])
+
+    print('ratios')
+    portfolio_fx.plot_normal_zscore(base_fx.get_zscore(ratios, ratios.mean(), np.std(ratios)))
+    # portfolio_fx.plot_indicators(mavg_zscore, macd_fast, macd_slow, vol, vol_mean, vol_limit)
+    print('returns')
+    portfolio_fx.plot_normalized_returns(settings['symbol1'], quotes[settings['symbol1']], settings['symbol2'],
+                                         quotes[settings['symbol2']], portfolio)
+    portfolio_fx.print_kpis(portfolio['nav'])
+
+    return portfolio, mavg_zscore
+
+def pair_trade_with_zscore_limit_and_sl(settings, quotes):
+    portfolio = portfolio_fx.init_portfolio()
+    vol_limit = pd.Series()
+    correlations = pd.Series()
+    zscore_correlations = pd.Series()
+    zscore_vol = pd.Series()
+    mavg_zscore = None
+    ratios = pd.Series()
+    vol = pd.Series()
+
+    for day, row in quotes.iterrows():
+        ## Calculate indicators
+        filtered_quotes = quotes.loc[:day]
+        s1 = filtered_quotes[settings['symbol1']].tail(252*2)
+        s2 = filtered_quotes[settings['symbol2']].tail(252*2)
+
+        ratios.loc[day] = base_fx.get_ratios(s1, s2)[-1]
+
+        mavg_fast_r = base_fx.get_mavg(ratios, settings['mavg_1'])
+        mavg_slow_r = base_fx.get_mavg(ratios, settings['mavg_2'])
+
+        std_r = base_fx.get_std(ratios, settings['mavg_2'])
+
+        if mavg_fast_r is None or mavg_slow_r is None or std_r is None:
+            continue
+
+        if mavg_zscore is None:
+            mavg_zscore = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)
+
+        mavg_zscore.loc[day] = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)[-1]
+
+        macd_fast = base_fx.get_macd(mavg_zscore, settings['macd_fast_points'])
+        macd_slow = base_fx.get_macd(mavg_zscore, settings['macd_slow_points'])
+
+        vol.loc[day] = ratios.tail(252*2).rolling(settings['mavg_2']).std(ddof=0)[-1] #ratios.rolling(settings['vol_interval']).std(ddof=0)[-1]
+
+        vol_mean = (vol.mean() * 0.8) + vol.mean()  #sorted_vol.mean()
+        if len(vol_limit) == 0:
+            vol_limit = pd.Series(index=vol.index)
+
+        vol_limit.loc[day] = vol_mean
+
+        vol_mavg_slow_r = base_fx.get_mavg(vol, settings['mavg_2'])
+        if vol_mavg_slow_r is None:
+            continue
+
+        zscore_vol.loc[day] = base_fx.get_zscore(vol_mavg_slow_r, vol_mavg_slow_r.mean(), vol_mavg_slow_r.std())[-1]
+
+        within_vol = abs(zscore_vol.loc[day]) <= 2 and vol.loc[day] < vol_limit[day]
+
+        c = coint(s1.tail(252*2), s2.tail(252*2))
+        correlations.loc[day] = c[1]
+        zscore_correlations.loc[day] = base_fx.get_zscore(correlations,
+                                                          correlations.mean(),
+                                                          correlations.std())[-1]  # base_fx.get_mavg(correlations, 450)
+
+        #zscore_vol.loc[day] = zscore_correlations.std()
 
         # print(c[1])
-        correlation_exists = abs(zscore_correlations.loc[day]) < settings['coint_limit']#c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
+        correlation_exists = abs(zscore_correlations.loc[day]) < settings[
+            'coint_limit']  # c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
         # if not correlation_exists:
         #     print('correlation fails ' + str(c[1]))
 
@@ -267,24 +386,30 @@ def pair_trade_with_zscore_limit_and_corr(settings, quotes):
                                               settings['leverage_limit'], settings['max_leverage'], portfolio)
 
         portfolio = portfolio_fx.calculate_nav(day, portfolio, s1.loc[day], s2.loc[day])
+        #portfolio = portfolio_fx.stop_loss(day, s1.loc[day], s2.loc[day], portfolio, settings['sl_limit'])
 
     portfolio['nav'] = portfolio['nav'].set_index('date')
 
     print('zscore correlation')
-    portfolio_fx.plot_objects([{'label': 'zscore_corr', 'value': zscore_correlations}, {'label': 'corr', 'value': correlations}])
+    portfolio_fx.plot_objects(
+        [{'label': 'zscore_corr', 'value': zscore_correlations}, {'label': 'corr', 'value': correlations}])
 
-    print('zscore vol')
-    portfolio_fx.plot_objects([{'label': 'zscore_vol', 'value': zscore_vol}])
+    print('corr volatility ')
+    # portfolio_fx.plot_objects([{'label': 'zscore_vol', 'value': zscore_vol}])
+    portfolio_fx.plot_indicators(mavg_zscore, macd_fast, macd_slow, vol, vol_mean, vol_limit)
+
+    print('corr vol zscore')
+    portfolio_fx.plot_objects(
+        [{'label': 'vol', 'value': vol}, {'label': 'zscore', 'value': zscore_vol}, {'label': 'vol limit', 'value': vol_limit}])
 
     print('ratios')
     portfolio_fx.plot_normal_zscore(base_fx.get_zscore(ratios, ratios.mean(), np.std(ratios)))
-    #portfolio_fx.plot_indicators(mavg_zscore, macd_fast, macd_slow, vol, vol_mean, vol_limit)
+    # portfolio_fx.plot_indicators(mavg_zscore, macd_fast, macd_slow, vol, vol_mean, vol_limit)
     print('returns')
-    portfolio_fx.plot_normalized_returns(settings['symbol1'], s1, settings['symbol2'], s2, portfolio)
+    portfolio_fx.plot_normalized_returns(settings['symbol1'], quotes[settings['symbol1']], settings['symbol2'], quotes[settings['symbol2']], portfolio)
     portfolio_fx.print_kpis(portfolio['nav'])
 
     return portfolio, mavg_zscore
-
 
 def get_hedge_ratio(symbol1, symbol2, quotes):
     df = pd.DataFrame(index=quotes.index)
@@ -367,6 +492,7 @@ def pair_trade_with_zscore_limit_and_corr_and_hr_and_half_life(settings, quotes)
 
         if len(filtered_quotes) <= settings['mavg_2']:
             continue
+
         s1 = filtered_quotes[settings['symbol1']]
         s2 = filtered_quotes[settings['symbol2']]
 
@@ -390,7 +516,8 @@ def pair_trade_with_zscore_limit_and_corr_and_hr_and_half_life(settings, quotes)
 
         #print(state_means)
 
-        hr = get_hedge_ratio_with_kalman(settings['symbol1'], settings['symbol2'], filtered_quotes)
+        #hr = get_hedge_ratio_with_kalman(settings['symbol1'], settings['symbol2'], filtered_quotes)
+        hr = get_hedge_ratio(settings['symbol1'], settings['symbol2'], filtered_quotes.tail(252))
         #print(hr)
         half_life = get_half_life(hr['spread'])
         if len(filtered_quotes) < half_life:
@@ -443,7 +570,7 @@ def pair_trade_with_zscore_limit_and_corr_and_hr_and_half_life(settings, quotes)
         zscore_vol.loc[day] = zscore_correlations.std()
 
         # print(c[1])
-        correlation_exists = c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
+        correlation_exists = c[1] < 0.4 and abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
         ## Trade
 
         if macd_slow[day] <= macd_fast[day]:
@@ -616,20 +743,24 @@ def pair_trade_with_zscore_limit_and_corr_and_hr(settings, quotes):
 
     return portfolio, mavg_zscore, daily_hr
 
+
 def pair_trade_with_zscore_limit_and_sl(settings, quotes):
     portfolio = portfolio_fx.init_portfolio()
     vol_limit = pd.Series()
     correlations = pd.Series()
     zscore_correlations = pd.Series()
-
+    zscore_vol = pd.Series()
+    mavg_zscore = None
+    ratios = pd.Series()
+    vol = pd.Series()
 
     for day, row in quotes.iterrows():
         ## Calculate indicators
         filtered_quotes = quotes.loc[:day]
-        s1 = filtered_quotes[settings['symbol1']]
-        s2 = filtered_quotes[settings['symbol2']]
+        s1 = filtered_quotes[settings['symbol1']].tail(252*2)
+        s2 = filtered_quotes[settings['symbol2']].tail(252*2)
 
-        ratios = base_fx.get_ratios(s1, s2)
+        ratios.loc[day] = base_fx.get_ratios(s1, s2)[-1]
 
         mavg_fast_r = base_fx.get_mavg(ratios, settings['mavg_1'])
         mavg_slow_r = base_fx.get_mavg(ratios, settings['mavg_2'])
@@ -639,35 +770,44 @@ def pair_trade_with_zscore_limit_and_sl(settings, quotes):
         if mavg_fast_r is None or mavg_slow_r is None or std_r is None:
             continue
 
-        mavg_zscore = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)
+        if mavg_zscore is None:
+            mavg_zscore = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)
+
+        mavg_zscore.loc[day] = base_fx.get_zscore(mavg_fast_r, mavg_slow_r, std_r)[-1]
 
         macd_fast = base_fx.get_macd(mavg_zscore, settings['macd_fast_points'])
         macd_slow = base_fx.get_macd(mavg_zscore, settings['macd_slow_points'])
 
-        vol = ratios.rolling(settings['vol_interval']).std(ddof=0)
+        vol.loc[day] = ratios.tail(252*2).rolling(settings['mavg_2']).std(ddof=0)[-1] #ratios.rolling(settings['vol_interval']).std(ddof=0)[-1]
 
-        ## Understand is volaltility is within limits for the period
-        ## Get the the last 30 peaks, then find the mean of those peaks. That's the limit
-        sorted_vol = vol.tail(settings['vol_peak_period']).sort_values(ascending=False).head(
-            settings['vol_mean_peak_period'])
-
-        vol_mean = sorted_vol.mean()
+        vol_mean = (vol.mean() * 0.8) + vol.mean()  #sorted_vol.mean()
         if len(vol_limit) == 0:
             vol_limit = pd.Series(index=vol.index)
 
         vol_limit.loc[day] = vol_mean
-        within_vol = not math.isnan(vol.loc[day]) and vol.loc[day] < vol_limit[day]
 
-        c = coint(s1.tail(settings['coint_period']), s2.tail(settings['coint_period']))
+        vol_mavg_slow_r = base_fx.get_mavg(vol, settings['mavg_2'])
+        if vol_mavg_slow_r is None:
+            continue
+
+        zscore_vol.loc[day] = base_fx.get_zscore(vol_mavg_slow_r, vol_mavg_slow_r.mean(), vol_mavg_slow_r.std())[-1]
+
+        within_vol = abs(zscore_vol.loc[day]) <= 2 and vol.loc[day] < vol_limit[day]
+
+        c = coint(s1.tail(252*2), s2.tail(252*2))
         correlations.loc[day] = c[1]
         zscore_correlations.loc[day] = base_fx.get_zscore(correlations,
                                                           correlations.mean(),
                                                           correlations.std())[-1]  # base_fx.get_mavg(correlations, 450)
 
-        mavg_zcorrelation = base_fx.get_mavg(zscore_correlations, 10)
+        #zscore_vol.loc[day] = zscore_correlations.std()
 
         # print(c[1])
-        correlation_exists =c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
+        correlation_exists = abs(zscore_correlations.loc[day]) < settings[
+            'coint_limit']  # c[1] < settings['coint_limit'] # abs(zscore_correlations.loc[day]) < settings['coint_limit']  # c[1] < zscore_correlations.loc[day] #settings['coint_limit']
+        # if not correlation_exists:
+        #     print('correlation fails ' + str(c[1]))
+
         ## Trade
 
         if macd_slow[day] <= macd_fast[day]:
@@ -675,43 +815,49 @@ def pair_trade_with_zscore_limit_and_sl(settings, quotes):
         else:
             new_trend = "DOWN"
 
-        open_positions = portfolio['holdings']['s1'] is not None or portfolio['holdings']['s2'] is not None
-
         if mavg_zscore[day] > settings['limit'] and new_trend == "DOWN" and within_vol and correlation_exists:
-            if not open_positions:
+            if portfolio['holdings']['s1'] == None and portfolio['holdings']['s2'] == None:
                 ## sell
                 portfolio = portfolio_fx.sell(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
                                               mavg_zscore[day],
                                               settings['leverage_limit'], settings['max_leverage'], portfolio)
 
         elif mavg_zscore[day] < -settings['limit'] and new_trend == "UP" and within_vol and correlation_exists:
-            if not open_positions:
+            if portfolio['holdings']['s1'] == None and portfolio['holdings']['s2'] == None:
                 ## buy
                 portfolio = portfolio_fx.buy(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
                                              mavg_zscore[day],
                                              settings['leverage_limit'], settings['max_leverage'], portfolio)
 
         elif abs(mavg_zscore[day]) < settings['exit_limit'] or not within_vol or not correlation_exists:
-            if open_positions:
+            if portfolio['holdings']['s1'] != None and portfolio['holdings']['s2'] != None:
                 ## exit
                 portfolio = portfolio_fx.exit(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
                                               mavg_zscore[day],
                                               settings['leverage_limit'], settings['max_leverage'], portfolio)
 
-        ## Trigger stop loss
-        portfolio = portfolio_fx.stop_loss(day, s1.loc[day], s2.loc[day], portfolio, settings['sl_limit'])
-
-        ## Calc Nav
         portfolio = portfolio_fx.calculate_nav(day, portfolio, s1.loc[day], s2.loc[day])
+        #portfolio = portfolio_fx.stop_loss(day, s1.loc[day], s2.loc[day], portfolio, settings['sl_limit'])
 
     portfolio['nav'] = portfolio['nav'].set_index('date')
 
-    portfolio_fx.plot_objects([{'label': 'zscore', 'value': zscore_correlations}, {'label': 'corr', 'value': correlations},
-                               {'label': 'mavg_zscore_corr', 'value': mavg_zcorrelation}])
+    print('zscore correlation')
+    portfolio_fx.plot_objects(
+        [{'label': 'zscore_corr', 'value': zscore_correlations}, {'label': 'corr', 'value': correlations}])
 
-    portfolio_fx.plot_normal_zscore(base_fx.get_zscore(ratios, ratios.mean(), np.std(ratios)))
+    print('corr volatility ')
+    # portfolio_fx.plot_objects([{'label': 'zscore_vol', 'value': zscore_vol}])
     portfolio_fx.plot_indicators(mavg_zscore, macd_fast, macd_slow, vol, vol_mean, vol_limit)
-    portfolio_fx.plot_normalized_returns(settings['symbol1'], s1, settings['symbol2'], s2, portfolio)
+
+    print('corr vol zscore')
+    portfolio_fx.plot_objects(
+        [{'label': 'vol', 'value': vol}, {'label': 'zscore', 'value': zscore_vol}, {'label': 'vol limit', 'value': vol_limit}])
+
+    print('ratios')
+    portfolio_fx.plot_normal_zscore(base_fx.get_zscore(ratios, ratios.mean(), np.std(ratios)))
+    # portfolio_fx.plot_indicators(mavg_zscore, macd_fast, macd_slow, vol, vol_mean, vol_limit)
+    print('returns')
+    portfolio_fx.plot_normalized_returns(settings['symbol1'], quotes[settings['symbol1']], settings['symbol2'], quotes[settings['symbol2']], portfolio)
     portfolio_fx.print_kpis(portfolio['nav'])
 
     return portfolio, mavg_zscore
