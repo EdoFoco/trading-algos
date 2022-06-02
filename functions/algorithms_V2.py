@@ -1,5 +1,5 @@
 import functions.functions as base_fx
-import functions.portfolio_functions as portfolio_fx
+import functions.pair_portfolio_functions as portfolio_fx
 from statsmodels.tsa.stattools import coint
 import pandas as pd
 import numpy as np
@@ -73,23 +73,23 @@ def pair_trade_v2_with_hurst(settings, quotes):
         if mavg_zscore[day] > settings['limit'] and new_trend == "DOWN" and within_vol and correlation_exists:
             if portfolio['holdings']['s1'] == None and portfolio['holdings']['s2'] == None:
                 ## sell
-                portfolio = portfolio_fx.sell(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
-                                              mavg_zscore[day],
-                                              settings['leverage_limit'], settings['max_leverage'], portfolio)
+                portfolio = portfolio_fx.sell_pair(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                                   mavg_zscore[day],
+                                                   settings['leverage_limit'], settings['max_leverage'], portfolio)
 
         elif mavg_zscore[day] < -settings['limit'] and new_trend == "UP" and within_vol and correlation_exists:
             if portfolio['holdings']['s1'] == None and portfolio['holdings']['s2'] == None:
                 ## buy
-                portfolio = portfolio_fx.buy(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
-                                             mavg_zscore[day],
-                                             settings['leverage_limit'], settings['max_leverage'], portfolio)
+                portfolio = portfolio_fx.buy_pair(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                                  mavg_zscore[day],
+                                                  settings['leverage_limit'], settings['max_leverage'], portfolio)
 
         elif abs(mavg_zscore[day]) < settings['exit_limit'] or not within_vol or not correlation_exists:
             if portfolio['holdings']['s1'] != None and portfolio['holdings']['s2'] != None:
                 ## exit
-                portfolio = portfolio_fx.exit(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
-                                              mavg_zscore[day],
-                                              settings['leverage_limit'], settings['max_leverage'], portfolio)
+                portfolio = portfolio_fx.exit_pairs(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                                    mavg_zscore[day],
+                                                    settings['leverage_limit'], settings['max_leverage'], portfolio)
 
         portfolio = portfolio_fx.calculate_nav(day, portfolio, s1.loc[day], s2.loc[day])
 
@@ -172,23 +172,23 @@ def pair_trade_v2_with_hurst_and_hedge(settings, quotes, spread):
         if mavg_zscore[day] > settings['limit'] and new_trend == "DOWN" and within_vol and correlation_exists:
             if portfolio['holdings']['s1'] == None and portfolio['holdings']['s2'] == None:
                 ## sell
-                portfolio = portfolio_fx.sell_with_hedge(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
-                                              mavg_zscore[day],
-                                              settings['leverage_limit'], settings['max_leverage'], portfolio, spread.loc[day])
+                portfolio = portfolio_fx.sell_pair_with_hedge(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                                              mavg_zscore[day],
+                                                              settings['leverage_limit'], settings['max_leverage'], portfolio, spread.loc[day])
 
         elif mavg_zscore[day] < -settings['limit'] and new_trend == "UP" and within_vol and correlation_exists:
             if portfolio['holdings']['s1'] == None and portfolio['holdings']['s2'] == None:
                 ## buy
-                portfolio = portfolio_fx.buy_with_hedge(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
-                                             mavg_zscore[day],
-                                             settings['leverage_limit'], settings['max_leverage'], portfolio, spread.loc[day])
+                portfolio = portfolio_fx.buy_pair_with_hedge(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                                             mavg_zscore[day],
+                                                             settings['leverage_limit'], settings['max_leverage'], portfolio, spread.loc[day])
 
         elif abs(mavg_zscore[day]) < settings['exit_limit'] or not within_vol or not correlation_exists:
             if portfolio['holdings']['s1'] != None and portfolio['holdings']['s2'] != None:
                 ## exit
-                portfolio = portfolio_fx.exit(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
-                                              mavg_zscore[day],
-                                              settings['leverage_limit'], settings['max_leverage'], portfolio)
+                portfolio = portfolio_fx.exit_pairs(day, settings['symbol1'], s1.loc[day], settings['symbol2'], s2.loc[day],
+                                                    mavg_zscore[day],
+                                                    settings['leverage_limit'], settings['max_leverage'], portfolio)
 
         portfolio = portfolio_fx.calculate_nav(day, portfolio, s1.loc[day], s2.loc[day])
 

@@ -12,7 +12,7 @@ import statsmodels.api as sm
 from pykalman import KalmanFilter
 from math import sqrt
 import functions.functions as base_fx
-import functions.portfolio_functions as portfolio_fx
+import functions.pair_portfolio_functions as portfolio_fx
 
 
 def KalmanFilterAverage(x):
@@ -110,18 +110,18 @@ def backtest(df, symbol1, symbol2):
             if portfolio['holdings']['s1'] is None and portfolio['holdings']['s2'] is None:
                 #print(f'sell {day}')
                 ## sell
-                portfolio = portfolio_fx.buy(day, symbol1, x.loc[day], symbol2, y.loc[day],
-                                             df1.zScore[day],
-                                             1, 1, portfolio)
+                portfolio = portfolio_fx.buy_pair(day, symbol1, x.loc[day], symbol2, y.loc[day],
+                                                  df1.zScore[day],
+                                                  1, 1, portfolio)
 
         elif (df1.loc[day]['zScore'] < - entryZscore):
             if portfolio['holdings']['s1'] is None and portfolio['holdings']['s2'] is None:
                # print(f'buy {day}')
 
                 ## buy
-               portfolio = portfolio_fx.sell(day, symbol1, x.loc[day], symbol2, y.loc[day],
-                                             df1.zScore[day],
-                                             1, 1, portfolio)
+               portfolio = portfolio_fx.sell_pair(day, symbol1, x.loc[day], symbol2, y.loc[day],
+                                                  df1.zScore[day],
+                                                  1, 1, portfolio)
 
 
        # ((df1.zScore > - exitZscore) & (df1.zScore.shift(1) < - exitZscore))
@@ -129,9 +129,9 @@ def backtest(df, symbol1, symbol2):
             if portfolio['holdings']['s1'] != None and portfolio['holdings']['s2'] != None:
                 ## exit
                # print(f'exit {day}')
-                portfolio = portfolio_fx.exit(day, symbol1, x.loc[day], symbol2, y.loc[day],
-                                                df1.zScore[day],
-                                                1, 1, portfolio)
+                portfolio = portfolio_fx.exit_pairs(day, symbol1, x.loc[day], symbol2, y.loc[day],
+                                                    df1.zScore[day],
+                                                    1, 1, portfolio)
 
         portfolio = portfolio_fx.calculate_nav(day, portfolio, x.loc[day], y.loc[day])
       #  print(portfolio['nav'].tail(1))
@@ -215,18 +215,18 @@ def fake_backtest(k_df, quotes, symbol1, symbol2):
             if portfolio['holdings']['s1'] is None and portfolio['holdings']['s2'] is None:
                 #print(f'sell {day}')
                 ## sell
-                portfolio = portfolio_fx.buy(day, symbol1, x.loc[day], symbol2, y.loc[day],
-                                             df1.zScore[day],
-                                             1, 1, portfolio)
+                portfolio = portfolio_fx.buy_pair(day, symbol1, x.loc[day], symbol2, y.loc[day],
+                                                  df1.zScore[day],
+                                                  1, 1, portfolio)
 
         elif (df1.loc[day]['zScore'] < - entryZscore):
             if portfolio['holdings']['s1'] is None and portfolio['holdings']['s2'] is None:
                # print(f'buy {day}')
 
                 ## buy
-               portfolio = portfolio_fx.sell(day, symbol1, x.loc[day], symbol2, y.loc[day],
-                                             df1.zScore[day],
-                                             1, 1, portfolio)
+               portfolio = portfolio_fx.sell_pair(day, symbol1, x.loc[day], symbol2, y.loc[day],
+                                                  df1.zScore[day],
+                                                  1, 1, portfolio)
 
 
        # ((df1.zScore > - exitZscore) & (df1.zScore.shift(1) < - exitZscore))
@@ -234,9 +234,9 @@ def fake_backtest(k_df, quotes, symbol1, symbol2):
             if portfolio['holdings']['s1'] != None and portfolio['holdings']['s2'] != None:
                 ## exit
                # print(f'exit {day}')
-                portfolio = portfolio_fx.exit(day, symbol1, x.loc[day], symbol2, y.loc[day],
-                                                df1.zScore[day],
-                                                1, 1, portfolio)
+                portfolio = portfolio_fx.exit_pairs(day, symbol1, x.loc[day], symbol2, y.loc[day],
+                                                    df1.zScore[day],
+                                                    1, 1, portfolio)
 
         portfolio = portfolio_fx.calculate_nav(day, portfolio, x.loc[day], y.loc[day])
       #  print(portfolio['nav'].tail(1))

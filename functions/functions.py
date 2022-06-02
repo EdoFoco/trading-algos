@@ -53,5 +53,17 @@ def get_macd(data, points):
     return data.ewm(span=points, adjust=False).mean()
 
 
+def get_real_macd(interval1, interval2, signal_interval, data):
+    mavg1 = data.ewm(span=interval1, adjust=False).mean()
+    mavg2 = data.ewm(span=interval2, adjust=False).mean()
+    macd = mavg1-mavg2
+    signal = macd.ewm(span=signal_interval, adjust=False).mean()
+    return signal
+
+
+def get_ema(interval, data):
+    return data.ewm(span=interval, adjust=False).mean()
+
+
 def normalize(data):
     return data / data.iloc[0]
